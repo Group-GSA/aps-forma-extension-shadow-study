@@ -1,4 +1,5 @@
 import { Forma } from "forma-embedded-view-sdk/auto";
+import { signal } from "@preact/signals";
 import { getPosition } from "suncalc";
 
 export type ShadowGroup = "context" | "design";
@@ -13,12 +14,33 @@ export type ShadowOverlaySettings = {
 
 export const DEFAULT_SHADOW_OPACITY = 0.55;
 
+/**
+ * Ground area shadowed by the design buildings at a given sun position.
+ * `area` is in square meters and undefined while the sun is below the
+ * horizon. The building footprints themselves are not counted, only the
+ * terrain around them which the buildings put in shadow.
+ */
+export type DesignShadowArea = {
+  date: Date;
+  area: number | undefined;
+};
+
+/**
+ * Latest computed design shadow area, or undefined until the proposal
+ * geometry has been loaded or when it contains no design buildings.
+ */
+export const designShadowArea = signal<DesignShadowArea | undefined>(undefined);
+
 const GROUND_TEXTURE_NAME = "shadow-study";
 const SUN_POLL_INTERVAL_MS = 500;
 /** Upper bound on the ground texture canvas dimensions, in pixels. */
 const MAX_TEXTURE_SIZE = 8192;
 /** Upper bound on the terrain heightfield grid dimensions, in cells. */
 const MAX_HEIGHTFIELD_SIZE = 2048;
+/** Upper bound on the mask used to measure shadow area, in pixels. */
+const MAX_AREA_MASK_SIZE = 2048;
+/** Minimum sun altitude, in degrees, for shadows to be drawn or measured. */
+const MIN_SUN_ALTITUDE_DEG = 0.5;
 
 const DEG = Math.PI / 180;
 
@@ -30,6 +52,8 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 type CasterFootprint = { x: number; y: number; minZ: number };
+
+type SunVector = { x: number; y: number; z: number };
 
 type CasterMesh = {
   positions: Float32Array;
@@ -211,6 +235,7 @@ class ShadowOverlay {
   private textureVisible = false;
   private lastDrawKey = "";
   private lastSunTime = 0;
+  private lastAreaSunTime: number | undefined;
   private pollTimer: number | undefined;
   private refreshQueue: Promise<void> = Promise.resolve();
 
@@ -288,6 +313,10 @@ class ShadowOverlay {
 
     this.hasGeometry = true;
     this.lastDrawKey = "";
+    this.lastAreaSunTime = undefined;
+    if (this.casters.design.length === 0) {
+      designShadowArea.value = undefined;
+    }
     this.requestRefresh();
     this.startPolling();
   }
@@ -483,7 +512,7 @@ class ShadowOverlay {
     x: number,
     y: number,
     z: number,
-    sun: { x: number; y: number; z: number },
+    sun: SunVector,
     groundZ: number,
   ): number {
     const hf = this.heightfield;
@@ -553,6 +582,9 @@ class ShadowOverlay {
     const sunDate = date ?? (await Forma.sun.getDate());
     this.lastSunTime = sunDate.getTime();
 
+    const sun = this.sunVector(sunDate);
+    this.updateDesignShadowArea(sunDate, sun);
+
     const { contextShadows, designShadows, terrain } = this.settings;
     const anyShadows = contextShadows.enabled || designShadows.enabled;
     if (!anyShadows && !terrain.enabled) {
@@ -590,35 +622,13 @@ class ShadowOverlay {
       ctx.fillRect(0, 0, canvas.width / pixelsPerMeter, canvas.height / pixelsPerMeter);
     }
 
-    if (anyShadows) {
-      // suncalc v2 returns degrees: azimuth clockwise from north (0 = N,
-      // 90 = E), altitude above the horizon.
-      const { azimuth, altitude } = getPosition(sunDate, this.latitude, this.longitude);
-      // Rotate the true-north azimuth into the scene's grid north frame.
-      const gridAzimuth = azimuth - this.convergenceDeg;
-      console.debug(
-        `[shadow-study] sun for ${sunDate.toISOString()}: ` +
-          `azimuth ${azimuth.toFixed(1)}deg from true north ` +
-          `(${gridAzimuth.toFixed(1)}deg from grid north), ` +
-          `altitude ${altitude.toFixed(1)}deg, ` +
-          `shadow bearing ${((gridAzimuth + 540) % 360).toFixed(1)}deg from grid north`,
-      );
-      // Only draw shadows while the sun is above the horizon.
-      if (altitude > 0.5) {
-        const azimuthRad = gridAzimuth * DEG;
-        const altitudeRad = altitude * DEG;
-        // Unit vector pointing towards the sun in the local east/north/up frame.
-        const sun = {
-          x: Math.sin(azimuthRad) * Math.cos(altitudeRad),
-          y: Math.cos(azimuthRad) * Math.cos(altitudeRad),
-          z: Math.sin(altitudeRad),
-        };
-        if (contextShadows.enabled) {
-          this.drawGroupShadows(ctx, this.casters.context, sun, contextShadows.color);
-        }
-        if (designShadows.enabled) {
-          this.drawGroupShadows(ctx, this.casters.design, sun, designShadows.color);
-        }
+    // Only draw shadows while the sun is above the horizon.
+    if (anyShadows && sun != null) {
+      if (contextShadows.enabled) {
+        this.drawGroupShadows(ctx, this.casters.context, sun, contextShadows.color);
+      }
+      if (designShadows.enabled) {
+        this.drawGroupShadows(ctx, this.casters.design, sun, designShadows.color);
       }
     }
 
@@ -638,6 +648,175 @@ class ShadowOverlay {
   }
 
   /**
+   * Unit vector pointing towards the sun in the scene's east/north/up frame
+   * for the given date, or undefined while the sun is at or below the
+   * horizon.
+   */
+  private sunVector(sunDate: Date): SunVector | undefined {
+    // suncalc v2 returns degrees: azimuth clockwise from north (0 = N,
+    // 90 = E), altitude above the horizon.
+    const { azimuth, altitude } = getPosition(sunDate, this.latitude, this.longitude);
+    // Rotate the true-north azimuth into the scene's grid north frame.
+    const gridAzimuth = azimuth - this.convergenceDeg;
+    console.debug(
+      `[shadow-study] sun for ${sunDate.toISOString()}: ` +
+        `azimuth ${azimuth.toFixed(1)}deg from true north ` +
+        `(${gridAzimuth.toFixed(1)}deg from grid north), ` +
+        `altitude ${altitude.toFixed(1)}deg, ` +
+        `shadow bearing ${((gridAzimuth + 540) % 360).toFixed(1)}deg from grid north`,
+    );
+    if (altitude <= MIN_SUN_ALTITUDE_DEG) {
+      return undefined;
+    }
+    const azimuthRad = gridAzimuth * DEG;
+    const altitudeRad = altitude * DEG;
+    return {
+      x: Math.sin(azimuthRad) * Math.cos(altitudeRad),
+      y: Math.cos(azimuthRad) * Math.cos(altitudeRad),
+      z: Math.sin(altitudeRad),
+    };
+  }
+
+  /**
+   * Recompute the design shadow area for the given sun date, unless it was
+   * already computed for that date, and publish it through the
+   * `designShadowArea` signal.
+   */
+  private updateDesignShadowArea(sunDate: Date, sun: SunVector | undefined): void {
+    if (this.casters.design.length === 0) {
+      return;
+    }
+    const sunTime = sunDate.getTime();
+    if (sunTime === this.lastAreaSunTime) {
+      return;
+    }
+    this.lastAreaSunTime = sunTime;
+
+    const area = sun != null ? this.measureShadowArea(this.casters.design, sun) : undefined;
+    if (area != null) {
+      console.debug(`[shadow-study] design shadow area ${area.toFixed(0)} m2`);
+    }
+    designShadowArea.value = { date: sunDate, area };
+  }
+
+  /**
+   * Area, in square meters, of the terrain shadowed by a group of casters:
+   * the union of their projected triangles minus the union of their
+   * footprints. Measured by rasterizing both unions into a mask covering the
+   * projected extent and summing the remaining coverage, so overlapping
+   * shadows from several buildings are only counted once.
+   */
+  private measureShadowArea(casters: CasterMesh[], sun: SunVector): number {
+    // Project every vertex once, keeping the footprint (vertical projection)
+    // alongside the shadow projection.
+    let vertexCount = 0;
+    for (const { positions } of casters) {
+      vertexCount += Math.floor(positions.length / 9) * 3;
+    }
+    const shadow = new Float64Array(vertexCount * 2);
+    const footprint = new Float64Array(vertexCount * 2);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let cursor = 0;
+    for (const { positions, groundZ } of casters) {
+      for (let i = 0; i + 8 < positions.length; i += 9) {
+        for (let v = 0; v < 3; v++) {
+          const x = positions[i + v * 3];
+          const y = positions[i + v * 3 + 1];
+          const z = positions[i + v * 3 + 2];
+          const t = this.shadowRayLength(x, y, z, sun, groundZ);
+          const sx = x - t * sun.x;
+          const sy = y - t * sun.y;
+          shadow[cursor * 2] = sx;
+          shadow[cursor * 2 + 1] = sy;
+          footprint[cursor * 2] = x;
+          footprint[cursor * 2 + 1] = y;
+          cursor++;
+          minX = Math.min(minX, sx, x);
+          maxX = Math.max(maxX, sx, x);
+          minY = Math.min(minY, sy, y);
+          maxY = Math.max(maxY, sy, y);
+        }
+      }
+    }
+    const extentX = maxX - minX;
+    const extentY = maxY - minY;
+    if (!(extentX > 0) || !(extentY > 0)) {
+      return 0;
+    }
+
+    // Measure at up to 4 px/m, scaling down on large shadows to keep the
+    // mask small enough to read back quickly.
+    const pixelsPerMeter = Math.min(4, MAX_AREA_MASK_SIZE / Math.max(extentX, extentY));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.ceil(extentX * pixelsPerMeter));
+    canvas.height = Math.max(1, Math.ceil(extentY * pixelsPerMeter));
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      return 0;
+    }
+    ctx.setTransform(
+      pixelsPerMeter,
+      0,
+      0,
+      pixelsPerMeter,
+      -minX * pixelsPerMeter,
+      -minY * pixelsPerMeter,
+    );
+
+    // Union of the projected shadow triangles.
+    ctx.fillStyle = "#000";
+    this.traceTriangles(ctx, shadow);
+    ctx.fill();
+
+    // Cut away the building footprints, so only the ground around the
+    // buildings which they put in shadow is counted.
+    ctx.globalCompositeOperation = "destination-out";
+    this.traceTriangles(ctx, footprint);
+    ctx.fill();
+
+    // Sum the alpha coverage so anti-aliased edges count fractionally.
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let coverage = 0;
+    for (let i = 3; i < data.length; i += 4) {
+      coverage += data[i];
+    }
+    return coverage / 255 / (pixelsPerMeter * pixelsPerMeter);
+  }
+
+  /**
+   * Add every triangle of a flat [x, y, x, y, ...] vertex list to a new path
+   * with a consistent winding, so a single nonzero fill yields the union of
+   * the triangles instead of cancelling overlapping ones.
+   */
+  private traceTriangles(ctx: CanvasRenderingContext2D, vertices: Float64Array): void {
+    ctx.beginPath();
+    for (let i = 0; i + 5 < vertices.length; i += 6) {
+      const ax = vertices[i];
+      const ay = vertices[i + 1];
+      const bx = vertices[i + 2];
+      const by = vertices[i + 3];
+      const cx = vertices[i + 4];
+      const cy = vertices[i + 5];
+      const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+      if (area === 0) {
+        continue;
+      }
+      ctx.moveTo(ax, ay);
+      if (area > 0) {
+        ctx.lineTo(bx, by);
+        ctx.lineTo(cx, cy);
+      } else {
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(bx, by);
+      }
+      ctx.closePath();
+    }
+  }
+
+  /**
    * Project every triangle of a group onto the terrain along the sun
    * direction and fill the union of the projected triangles in one pass, so
    * overlapping shadow triangles keep a uniform opacity.
@@ -645,7 +824,7 @@ class ShadowOverlay {
   private drawGroupShadows(
     ctx: CanvasRenderingContext2D,
     casters: CasterMesh[],
-    sun: { x: number; y: number; z: number },
+    sun: SunVector,
     color: string,
   ): void {
     if (this.bbox == null) {

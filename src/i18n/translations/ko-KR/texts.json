@@ -30,6 +30,13 @@
   "header": {
     "title": "그림자 연구"
   },
+  "shadowArea": {
+    "title": "그림자 면적",
+    "proposal": "제안 그림자 면적",
+    "hint": "현재 태양 위치에서 설계 건물이 지면에 드리우는 그림자 면적(건물 바닥 면적 제외).",
+    "sunBelowHorizon": "태양이 지평선 아래에 있음",
+    "unavailable": "설계 건물 없음"
+  },
   "size": {
     "fourK": "4K({{resolution}})",
     "label": "크기",

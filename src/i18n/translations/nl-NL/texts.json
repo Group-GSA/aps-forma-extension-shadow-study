@@ -30,6 +30,13 @@
   "header": {
     "title": "Schaduwonderzoek"
   },
+  "shadowArea": {
+    "title": "Schaduwoppervlak",
+    "proposal": "Schaduwoppervlak van het voorstel",
+    "hint": "Terreinoppervlak dat bij de huidige zonnestand door de ontwerpgebouwen wordt beschaduwd, exclusief hun voetafdruk.",
+    "sunBelowHorizon": "Zon onder de horizon",
+    "unavailable": "Geen ontwerpgebouwen"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Grootte",

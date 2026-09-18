@@ -30,6 +30,13 @@
   "header": {
     "title": "Studie zastínění"
   },
+  "shadowArea": {
+    "title": "Plocha stínu",
+    "proposal": "Plocha stínu návrhu",
+    "hint": "Plocha terénu zastíněná navrhovanými budovami při aktuální poloze slunce, bez jejich půdorysů.",
+    "sunBelowHorizon": "Slunce pod obzorem",
+    "unavailable": "Žádné navrhované budovy"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Velikost",

@@ -30,6 +30,13 @@
   "header": {
     "title": "Étude d’ombrage"
   },
+  "shadowArea": {
+    "title": "Surface d'ombre",
+    "proposal": "Surface d'ombre de la proposition",
+    "hint": "Surface du terrain ombragée par les bâtiments de conception à la position actuelle du soleil, hors emprise des bâtiments.",
+    "sunBelowHorizon": "Soleil sous l'horizon",
+    "unavailable": "Aucun bâtiment de conception"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Taille",

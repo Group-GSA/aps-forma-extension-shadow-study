@@ -30,6 +30,13 @@
   "header": {
     "title": "Estudo das sombras"
   },
+  "shadowArea": {
+    "title": "Área de sombra",
+    "proposal": "Área de sombra da proposta",
+    "hint": "Área do terreno sombreada pelos edifícios do projeto na posição atual do sol, excluindo suas projeções.",
+    "sunBelowHorizon": "Sol abaixo do horizonte",
+    "unavailable": "Nenhum edifício de projeto"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Tamanho",

@@ -30,6 +30,13 @@
   "header": {
     "title": "阴影分析"
   },
+  "shadowArea": {
+    "title": "阴影面积",
+    "proposal": "方案阴影面积",
+    "hint": "当前太阳位置下设计建筑在地面上投射的阴影面积（不含建筑占地面积）。",
+    "sunBelowHorizon": "太阳位于地平线以下",
+    "unavailable": "没有设计建筑"
+  },
   "size": {
     "fourK": "4K （{{resolution}}）",
     "label": "尺寸",

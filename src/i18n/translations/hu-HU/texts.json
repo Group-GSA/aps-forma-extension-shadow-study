@@ -30,6 +30,13 @@
   "header": {
     "title": "Árnyékvizsgálat"
   },
+  "shadowArea": {
+    "title": "Árnyékterület",
+    "proposal": "A javaslat árnyékterülete",
+    "hint": "A tervezett épületek által a jelenlegi napálláskor árnyékolt terepterület, az épületek alapterülete nélkül.",
+    "sunBelowHorizon": "A nap a horizont alatt van",
+    "unavailable": "Nincsenek tervezett épületek"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Méret",

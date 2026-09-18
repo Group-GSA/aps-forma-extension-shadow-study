@@ -30,6 +30,13 @@
   "header": {
     "title": "陰影研究"
   },
+  "shadowArea": {
+    "title": "陰影面積",
+    "proposal": "方案陰影面積",
+    "hint": "目前太陽位置下設計建築在地面上投射的陰影面積（不含建築佔地面積）。",
+    "sunBelowHorizon": "太陽位於地平線以下",
+    "unavailable": "沒有設計建築"
+  },
   "size": {
     "fourK": "4K （{{resolution}}）",
     "label": "大小",

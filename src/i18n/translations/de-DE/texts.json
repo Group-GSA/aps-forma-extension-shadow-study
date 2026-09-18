@@ -30,6 +30,13 @@
   "header": {
     "title": "Schattenstudie"
   },
+  "shadowArea": {
+    "title": "Schattenfläche",
+    "proposal": "Schattenfläche des Entwurfs",
+    "hint": "Geländefläche, die bei der aktuellen Sonnenposition von den Entwurfsgebäuden beschattet wird, ohne deren Grundflächen.",
+    "sunBelowHorizon": "Sonne unter dem Horizont",
+    "unavailable": "Keine Entwurfsgebäude"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Größe",

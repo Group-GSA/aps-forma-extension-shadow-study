@@ -3,7 +3,7 @@ import { saveAs } from "file-saver";
 import JSZip from "jszip";
 import { DateTime } from "luxon";
 import { useTranslation } from "../i18n/useTranslation";
-import { shadowOverlay } from "../shadowOverlay";
+import { designShadowArea, shadowOverlay } from "../shadowOverlay";
 
 type ExportButtonProps = {
   month: number;
@@ -34,6 +34,7 @@ export default function ExportButton(props: ExportButtonProps) {
 
       const zip = new JSZip();
       const zipFolder = zip.folder("shadow-study") as JSZip;
+      const areaRows: string[] = [];
 
       let current = DateTime.fromObject(
         {
@@ -64,7 +65,20 @@ export default function ExportButton(props: ExportButtonProps) {
         const data = canvas.toDataURL().split("base64,")[1];
         zipFolder.file(filename, data, { base64: true });
 
+        const shadowArea = designShadowArea.value;
+        if (shadowArea != null && shadowArea.date.getTime() === date.getTime()) {
+          areaRows.push(
+            `${current.toFormat("HH:mm")},${shadowArea.area != null ? Math.round(shadowArea.area) : ""}`,
+          );
+        }
+
         current = current.plus({ minutes: interval });
+      }
+      if (areaRows.length > 0) {
+        zipFolder.file(
+          "shadow-areas.csv",
+          ["time,proposal_shadow_area_m2", ...areaRows].join("\n"),
+        );
       }
 
       const dateStr =

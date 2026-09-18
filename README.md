@@ -32,6 +32,10 @@ version keeps that workflow and adds a **Color configurations** panel and
 - Each group can be **checked on or off**, and **Reset colors** restores the
   defaults.
 - **Visibility** toggles hide or show context and design buildings entirely.
+- **Shadow area** shows the ground area, in square meters, that the design
+  buildings put in shadow at the current sun position. It updates live as the
+  sun moves, and the exported zip includes a `shadow-areas.csv` with the area
+  at every captured time.
 
 The settings apply to both the live preview and the exported screenshots, so
 the customized look carries through to the final shadow study.
@@ -48,6 +52,13 @@ two shadow groups to be colored separately.
 The color and visibility controls live in
 `src/components/GeometryColorSelector.tsx`, and the preview and export buttons
 refresh the overlay for each sun position before capturing.
+
+The shadow area is measured from the same projection: the projected design
+triangles are rasterized into a mask, the building footprints are cut out, and
+the remaining coverage is summed. Overlapping shadows from several buildings
+are therefore counted once, shadows are measured on the terrain only (not on
+other buildings), and the footprints themselves are not included. The value is
+shown in `src/components/ShadowAreaDisplay.tsx`.
 
 ## Local development
 

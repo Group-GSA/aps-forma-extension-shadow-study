@@ -30,6 +30,13 @@
   "header": {
     "title": "Studio delle ombre"
   },
+  "shadowArea": {
+    "title": "Area d'ombra",
+    "proposal": "Area d'ombra della proposta",
+    "hint": "Area del terreno in ombra a causa degli edifici di progetto nella posizione attuale del sole, escluse le loro impronte.",
+    "sunBelowHorizon": "Sole sotto l'orizzonte",
+    "unavailable": "Nessun edificio di progetto"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Dimensione",

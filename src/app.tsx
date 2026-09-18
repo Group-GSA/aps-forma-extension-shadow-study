@@ -6,6 +6,7 @@ import ResolutionSelector from "./components/ResolutionSelector";
 import TimeSelector from "./components/TimeSelector";
 import PreviewButton from "./components/PreviewButton";
 import GeometryColorSelector from "./components/GeometryColorSelector";
+import ShadowAreaDisplay from "./components/ShadowAreaDisplay";
 import { useTranslation } from "./i18n/useTranslation";
 
 export default function App() {
@@ -38,6 +39,7 @@ export default function App() {
       />
       <IntervalSelector interval={interval} setInterval={setInterval} />
       <GeometryColorSelector />
+      <ShadowAreaDisplay />
       <ResolutionSelector resolution={resolution} setResolution={setResolution} />
       <PreviewButton
         month={month}

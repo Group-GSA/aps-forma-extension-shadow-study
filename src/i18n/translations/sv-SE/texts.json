@@ -30,6 +30,13 @@
   "header": {
     "title": "Skuggstudie"
   },
+  "shadowArea": {
+    "title": "Skuggarea",
+    "proposal": "Förslagets skuggarea",
+    "hint": "Markyta som skuggas av designbyggnaderna vid aktuell solposition, exklusive deras fotavtryck.",
+    "sunBelowHorizon": "Solen är under horisonten",
+    "unavailable": "Inga designbyggnader"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Storlek",

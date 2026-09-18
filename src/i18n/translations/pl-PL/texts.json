@@ -30,6 +30,13 @@
   "header": {
     "title": "Badanie cieni"
   },
+  "shadowArea": {
+    "title": "Powierzchnia cienia",
+    "proposal": "Powierzchnia cienia propozycji",
+    "hint": "Powierzchnia terenu zacieniona przez budynki projektu przy bieżącym położeniu słońca, bez ich obrysów.",
+    "sunBelowHorizon": "Słońce poniżej horyzontu",
+    "unavailable": "Brak budynków projektu"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Rozmiar",

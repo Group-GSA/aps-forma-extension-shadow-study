@@ -97,3 +97,16 @@ weave-select {
   padding: 0;
   background-color: transparent;
 }
+
+.shadow-area-value {
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.shadow-area-hint {
+  margin-top: -8px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  line-height: 1.3;
+  color: #3c3c3cb2;
+}

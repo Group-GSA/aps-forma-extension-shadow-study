@@ -30,6 +30,13 @@
   "header": {
     "title": "Skyggeundersøgelse"
   },
+  "shadowArea": {
+    "title": "Skyggeareal",
+    "proposal": "Forslagets skyggeareal",
+    "hint": "Terrænareal, der skygges af designbygningerne ved den aktuelle solposition, eksklusive deres fodaftryk.",
+    "sunBelowHorizon": "Solen er under horisonten",
+    "unavailable": "Ingen designbygninger"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Størrelse",

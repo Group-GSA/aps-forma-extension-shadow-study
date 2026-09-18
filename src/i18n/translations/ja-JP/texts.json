@@ -30,6 +30,13 @@
   "header": {
     "title": "影シミュレーション"
   },
+  "shadowArea": {
+    "title": "影の面積",
+    "proposal": "提案の影の面積",
+    "hint": "現在の太陽位置で設計の建物によって影になる地表の面積（建物の敷地面積を除く）。",
+    "sunBelowHorizon": "太陽が地平線の下にあります",
+    "unavailable": "設計の建物がありません"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "サイズ",

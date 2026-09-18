@@ -30,6 +30,13 @@
   "header": {
     "title": "Shadow study"
   },
+  "shadowArea": {
+    "title": "Shadow area",
+    "proposal": "Proposal shadow area",
+    "hint": "Ground area shaded by the design buildings at the current sun position, excluding their footprints.",
+    "sunBelowHorizon": "Sun below horizon",
+    "unavailable": "No design buildings"
+  },
   "size": {
     "fourK": "4K ({{resolution}})",
     "label": "Size",
