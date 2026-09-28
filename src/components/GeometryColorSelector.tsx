@@ -1,5 +1,5 @@
 import { Forma } from "forma-embedded-view-sdk/auto";
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { FormaElement, Urn } from "forma-embedded-view-sdk/elements/types";
 import { useTranslation } from "../i18n/useTranslation";
 import { DEFAULT_SHADOW_OPACITY, shadowOverlay } from "../shadowOverlay";
@@ -10,11 +10,112 @@ const DEFAULT_CONTEXT_SHADOWS_COLOR = "#4d4d4d";
 const DEFAULT_DESIGN_SHADOWS_COLOR = "#31437c";
 const DEFAULT_TERRAIN_COLOR = "#ffffff";
 
+/** Delay before re-reading the proposal after a change, so a burst of edits is handled once. */
+const PROPOSAL_REFRESH_DEBOUNCE_MS = 300;
+
 type ElementGroups = {
   context: string[];
   design: string[];
   terrain: string[];
 };
+
+type ProposalState = {
+  rootUrn: Urn;
+  groups: ElementGroups;
+};
+
+/**
+ * Color configuration persisted between sessions.
+ */
+type ColorConfig = {
+  shouldPaintContext: boolean;
+  shouldPaintDesign: boolean;
+  shouldPaintContextShadows: boolean;
+  shouldPaintDesignShadows: boolean;
+  shouldPaintTerrain: boolean;
+  contextColor: string;
+  designColor: string;
+  contextShadowsColor: string;
+  designShadowsColor: string;
+  terrainColor: string;
+  shadowOpacity: number;
+};
+
+const DEFAULT_COLOR_CONFIG: ColorConfig = {
+  shouldPaintContext: false,
+  shouldPaintDesign: false,
+  shouldPaintContextShadows: false,
+  shouldPaintDesignShadows: false,
+  shouldPaintTerrain: false,
+  contextColor: DEFAULT_CONTEXT_BUILDINGS_COLOR,
+  designColor: DEFAULT_DESIGN_BUILDINGS_COLOR,
+  contextShadowsColor: DEFAULT_CONTEXT_SHADOWS_COLOR,
+  designShadowsColor: DEFAULT_DESIGN_SHADOWS_COLOR,
+  terrainColor: DEFAULT_TERRAIN_COLOR,
+  shadowOpacity: DEFAULT_SHADOW_OPACITY,
+};
+
+/** Bump the version whenever the shape of {@link ColorConfig} changes. */
+const COLOR_CONFIG_STORAGE_KEY = "shadow-study.colorConfig.v1";
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+/**
+ * Read the persisted color configuration, falling back to the defaults for
+ * anything missing or malformed. Storage access is wrapped since embedded
+ * views run in a third-party iframe where some browsers block it.
+ */
+function loadColorConfig(): ColorConfig {
+  try {
+    const raw = window.localStorage.getItem(COLOR_CONFIG_STORAGE_KEY);
+    if (raw == null) {
+      return DEFAULT_COLOR_CONFIG;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed == null || typeof parsed !== "object") {
+      return DEFAULT_COLOR_CONFIG;
+    }
+    const stored = parsed as Record<string, unknown>;
+    const bool = (key: keyof ColorConfig): boolean =>
+      typeof stored[key] === "boolean"
+        ? (stored[key] as boolean)
+        : (DEFAULT_COLOR_CONFIG[key] as boolean);
+    const color = (key: keyof ColorConfig): string =>
+      typeof stored[key] === "string" && HEX_COLOR.test(stored[key] as string)
+        ? (stored[key] as string)
+        : (DEFAULT_COLOR_CONFIG[key] as string);
+    const opacity =
+      typeof stored.shadowOpacity === "number" &&
+      stored.shadowOpacity >= 0.05 &&
+      stored.shadowOpacity <= 1
+        ? stored.shadowOpacity
+        : DEFAULT_COLOR_CONFIG.shadowOpacity;
+    return {
+      shouldPaintContext: bool("shouldPaintContext"),
+      shouldPaintDesign: bool("shouldPaintDesign"),
+      shouldPaintContextShadows: bool("shouldPaintContextShadows"),
+      shouldPaintDesignShadows: bool("shouldPaintDesignShadows"),
+      shouldPaintTerrain: bool("shouldPaintTerrain"),
+      contextColor: color("contextColor"),
+      designColor: color("designColor"),
+      contextShadowsColor: color("contextShadowsColor"),
+      designShadowsColor: color("designShadowsColor"),
+      terrainColor: color("terrainColor"),
+      shadowOpacity: opacity,
+    };
+  } catch (error) {
+    console.warn("[shadow-study] could not read stored color configuration", error);
+    return DEFAULT_COLOR_CONFIG;
+  }
+}
+
+function saveColorConfig(config: ColorConfig): void {
+  try {
+    window.localStorage.setItem(COLOR_CONFIG_STORAGE_KEY, JSON.stringify(config));
+  } catch (error) {
+    console.warn("[shadow-study] could not store color configuration", error);
+  }
+}
 
 /**
  * Element URNs follow the scheme `urn:adsk-forma-elements:{system}:{authcontext}:{id}:{revision}`.
@@ -175,31 +276,103 @@ function ColorRow({ label, checked, setChecked, color, setColor }: ColorRowProps
   );
 }
 
+/**
+ * Keep the element groups in sync with the proposal currently open in Forma.
+ *
+ * Every proposal change (edits as well as switching proposal) schedules a
+ * re-read of the hierarchy once the proposal has been persisted, which the
+ * elements API requires. Overlapping reads are resolved in favour of the
+ * most recent one so a slow response for an old revision can never
+ * overwrite a newer one.
+ */
+function useProposalElementGroups(): ProposalState | undefined {
+  const [state, setState] = useState<ProposalState | undefined>();
+
+  useEffect(() => {
+    let disposed = false;
+    let generation = 0;
+    let lastRootUrn: Urn | undefined;
+    let timer: number | undefined;
+    let subscription: { unsubscribe: () => void } | undefined;
+
+    const refresh = async () => {
+      const current = ++generation;
+      try {
+        await Forma.proposal.awaitProposalPersisted();
+        const rootUrn = (await Forma.proposal.getRootUrn()) as Urn;
+        if (disposed || current !== generation) {
+          return;
+        }
+        if (rootUrn === lastRootUrn) {
+          // Same revision, so the hierarchy and geometry are unchanged.
+          return;
+        }
+        const { elements } = await Forma.elements.get({ urn: rootUrn, recursive: true });
+        if (disposed || current !== generation) {
+          return;
+        }
+        lastRootUrn = rootUrn;
+        setState({ rootUrn, groups: groupElementPaths(rootUrn, elements) });
+      } catch (error) {
+        console.warn("[shadow-study] could not read the proposal hierarchy", error);
+      }
+    };
+
+    const scheduleRefresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void refresh(), PROPOSAL_REFRESH_DEBOUNCE_MS);
+    };
+
+    void refresh();
+    Forma.proposal
+      .subscribe(scheduleRefresh)
+      .then((result) => {
+        if (disposed) {
+          result.unsubscribe();
+        } else {
+          subscription = result;
+        }
+      })
+      .catch((error) => {
+        console.warn("[shadow-study] could not subscribe to proposal changes", error);
+      });
+
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  return state;
+}
+
 export default function GeometryColorSelector() {
   const { t } = useTranslation();
 
   const [showContext, setShowContext] = useState(true);
   const [showDesign, setShowDesign] = useState(true);
 
-  const [shouldPaintContext, setShouldPaintContext] = useState(false);
-  const [shouldPaintDesign, setShouldPaintDesign] = useState(false);
-  const [shouldPaintContextShadows, setShouldPaintContextShadows] = useState(false);
-  const [shouldPaintDesignShadows, setShouldPaintDesignShadows] = useState(false);
-  const [shouldPaintTerrain, setShouldPaintTerrain] = useState(false);
+  const [initialConfig] = useState(loadColorConfig);
+  const [shouldPaintContext, setShouldPaintContext] = useState(initialConfig.shouldPaintContext);
+  const [shouldPaintDesign, setShouldPaintDesign] = useState(initialConfig.shouldPaintDesign);
+  const [shouldPaintContextShadows, setShouldPaintContextShadows] = useState(
+    initialConfig.shouldPaintContextShadows,
+  );
+  const [shouldPaintDesignShadows, setShouldPaintDesignShadows] = useState(
+    initialConfig.shouldPaintDesignShadows,
+  );
+  const [shouldPaintTerrain, setShouldPaintTerrain] = useState(initialConfig.shouldPaintTerrain);
 
-  const [contextColor, setContextColor] = useState(DEFAULT_CONTEXT_BUILDINGS_COLOR);
-  const [designColor, setDesignColor] = useState(DEFAULT_DESIGN_BUILDINGS_COLOR);
-  const [contextShadowsColor, setContextShadowsColor] = useState(DEFAULT_CONTEXT_SHADOWS_COLOR);
-  const [designShadowsColor, setDesignShadowsColor] = useState(DEFAULT_DESIGN_SHADOWS_COLOR);
-  const [terrainColor, setTerrainColor] = useState(DEFAULT_TERRAIN_COLOR);
-  const [shadowOpacity, setShadowOpacity] = useState(DEFAULT_SHADOW_OPACITY);
+  const [contextColor, setContextColor] = useState(initialConfig.contextColor);
+  const [designColor, setDesignColor] = useState(initialConfig.designColor);
+  const [contextShadowsColor, setContextShadowsColor] = useState(initialConfig.contextShadowsColor);
+  const [designShadowsColor, setDesignShadowsColor] = useState(initialConfig.designShadowsColor);
+  const [terrainColor, setTerrainColor] = useState(initialConfig.terrainColor);
+  const [shadowOpacity, setShadowOpacity] = useState(initialConfig.shadowOpacity);
 
-  const [elementGroups, setElementGroups] = useState<ElementGroups>({
-    context: [],
-    design: [],
-    terrain: [],
-  });
-  const [rootUrn, setRootUrn] = useState<Urn | undefined>();
+  const proposal = useProposalElementGroups();
+  const elementGroups = proposal?.groups;
 
   const setContextColorDebounced = useMemo(() => debounce(setContextColor, 50), []);
   const setDesignColorDebounced = useMemo(() => debounce(setDesignColor, 50), []);
@@ -209,26 +382,40 @@ export default function GeometryColorSelector() {
   const setShadowOpacityDebounced = useMemo(() => debounce(setShadowOpacity, 50), []);
 
   useEffect(() => {
-    Forma.proposal.getRootUrn().then((rootUrn) => {
-      setRootUrn(rootUrn as Urn);
+    saveColorConfig({
+      shouldPaintContext,
+      shouldPaintDesign,
+      shouldPaintContextShadows,
+      shouldPaintDesignShadows,
+      shouldPaintTerrain,
+      contextColor,
+      designColor,
+      contextShadowsColor,
+      designShadowsColor,
+      terrainColor,
+      shadowOpacity,
     });
-    Forma.proposal.subscribe(
-      ({ rootUrn }) => {
-        setRootUrn(rootUrn as Urn);
-      },
-      { debouncedPersistedOnly: true },
-    );
-  }, []);
+  }, [
+    shouldPaintContext,
+    shouldPaintDesign,
+    shouldPaintContextShadows,
+    shouldPaintDesignShadows,
+    shouldPaintTerrain,
+    contextColor,
+    designColor,
+    contextShadowsColor,
+    designShadowsColor,
+    terrainColor,
+    shadowOpacity,
+  ]);
 
+  // Paths currently painted, so paths that drop out (unchecked group, or a
+  // proposal change that removed or re-keyed elements) can be cleared.
+  const paintedPaths = useRef(new Set<string>());
   useEffect(() => {
-    if (rootUrn != null) {
-      Forma.elements.get({ urn: rootUrn as Urn, recursive: true }).then(({ elements }) => {
-        setElementGroups(groupElementPaths(rootUrn as Urn, elements));
-      });
+    if (elementGroups == null) {
+      return;
     }
-  }, [rootUrn]);
-
-  useEffect(() => {
     const pathsToColor = new Map<string, string>();
     if (shouldPaintContext) {
       for (const path of elementGroups.context) {
@@ -241,52 +428,56 @@ export default function GeometryColorSelector() {
       }
     }
 
+    const pathsToClear = [...paintedPaths.current].filter((path) => !pathsToColor.has(path));
+    paintedPaths.current = new Set(pathsToColor.keys());
+
     if (pathsToColor.size === 0) {
       Forma.render.elementColors.clearAll();
       return;
     }
-
-    const pathsToClear = [
-      ...(shouldPaintContext ? [] : elementGroups.context),
-      ...(shouldPaintDesign ? [] : elementGroups.design),
-    ];
     if (pathsToClear.length > 0) {
       Forma.render.elementColors.clear({ paths: pathsToClear });
     }
     Forma.render.elementColors.set({ pathsToColor });
   }, [shouldPaintContext, shouldPaintDesign, contextColor, designColor, elementGroups]);
 
+  // Paths currently hidden, so they can be shown again if they leave the group.
+  const hiddenPaths = useRef(new Set<string>());
   useEffect(() => {
-    for (const path of topLevelPaths(elementGroups.context)) {
-      if (showContext) {
+    if (elementGroups == null) {
+      return;
+    }
+    const pathsToHide = new Set<string>([
+      ...(showContext ? [] : topLevelPaths(elementGroups.context)),
+      ...(showDesign ? [] : topLevelPaths(elementGroups.design)),
+    ]);
+    for (const path of hiddenPaths.current) {
+      if (!pathsToHide.has(path)) {
         Forma.render.unhideElement({ path });
-      } else {
+      }
+    }
+    for (const path of pathsToHide) {
+      if (!hiddenPaths.current.has(path)) {
         Forma.render.hideElement({ path });
       }
     }
-  }, [showContext, elementGroups]);
+    hiddenPaths.current = pathsToHide;
+  }, [showContext, showDesign, elementGroups]);
 
   useEffect(() => {
-    for (const path of topLevelPaths(elementGroups.design)) {
-      if (showDesign) {
-        Forma.render.unhideElement({ path });
-      } else {
-        Forma.render.hideElement({ path });
-      }
+    if (proposal == null) {
+      return;
     }
-  }, [showDesign, elementGroups]);
-
-  useEffect(() => {
-    if (elementGroups.context.length > 0 || elementGroups.design.length > 0) {
-      shadowOverlay.loadGeometry(
-        {
-          context: topLevelPaths(elementGroups.context),
-          design: topLevelPaths(elementGroups.design),
-        },
-        elementGroups.terrain,
-      );
-    }
-  }, [elementGroups]);
+    // Keyed on the proposal revision rather than the groups: moving or
+    // reshaping a building keeps the same paths but changes the mesh.
+    void shadowOverlay.loadGeometry(
+      {
+        context: topLevelPaths(proposal.groups.context),
+        design: topLevelPaths(proposal.groups.design),
+      },
+      proposal.groups.terrain,
+    );
+  }, [proposal]);
 
   useEffect(() => {
     shadowOverlay.setSettings({
@@ -315,17 +506,17 @@ export default function GeometryColorSelector() {
   ]);
 
   const onResetColors = () => {
-    setShouldPaintContext(false);
-    setShouldPaintDesign(false);
-    setShouldPaintContextShadows(false);
-    setShouldPaintDesignShadows(false);
-    setShouldPaintTerrain(false);
-    setContextColor(DEFAULT_CONTEXT_BUILDINGS_COLOR);
-    setDesignColor(DEFAULT_DESIGN_BUILDINGS_COLOR);
-    setContextShadowsColor(DEFAULT_CONTEXT_SHADOWS_COLOR);
-    setDesignShadowsColor(DEFAULT_DESIGN_SHADOWS_COLOR);
-    setTerrainColor(DEFAULT_TERRAIN_COLOR);
-    setShadowOpacity(DEFAULT_SHADOW_OPACITY);
+    setShouldPaintContext(DEFAULT_COLOR_CONFIG.shouldPaintContext);
+    setShouldPaintDesign(DEFAULT_COLOR_CONFIG.shouldPaintDesign);
+    setShouldPaintContextShadows(DEFAULT_COLOR_CONFIG.shouldPaintContextShadows);
+    setShouldPaintDesignShadows(DEFAULT_COLOR_CONFIG.shouldPaintDesignShadows);
+    setShouldPaintTerrain(DEFAULT_COLOR_CONFIG.shouldPaintTerrain);
+    setContextColor(DEFAULT_COLOR_CONFIG.contextColor);
+    setDesignColor(DEFAULT_COLOR_CONFIG.designColor);
+    setContextShadowsColor(DEFAULT_COLOR_CONFIG.contextShadowsColor);
+    setDesignShadowsColor(DEFAULT_COLOR_CONFIG.designShadowsColor);
+    setTerrainColor(DEFAULT_COLOR_CONFIG.terrainColor);
+    setShadowOpacity(DEFAULT_COLOR_CONFIG.shadowOpacity);
   };
 
   return (

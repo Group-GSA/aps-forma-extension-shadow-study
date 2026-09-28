@@ -238,6 +238,8 @@ class ShadowOverlay {
   private lastAreaSunTime: number | undefined;
   private pollTimer: number | undefined;
   private refreshQueue: Promise<void> = Promise.resolve();
+  /** Incremented per loadGeometry call so an older load that finishes late is discarded. */
+  private loadGeneration = 0;
 
   /**
    * Fetch the mesh for each group of building paths, together with the
@@ -248,11 +250,15 @@ class ShadowOverlay {
     groupPaths: Record<ShadowGroup, string[]>,
     terrainPaths: string[] = [],
   ): Promise<void> {
+    const generation = ++this.loadGeneration;
     const [bbox, geoLocation, project] = await Promise.all([
       Forma.terrain.getBbox(),
       Forma.project.getGeoLocation(),
       Forma.project.get().catch(() => undefined),
     ]);
+    if (generation !== this.loadGeneration) {
+      return;
+    }
     this.bbox = bbox;
     if (geoLocation) {
       [this.latitude, this.longitude] = geoLocation;
@@ -289,27 +295,36 @@ class ShadowOverlay {
       }
     }
 
-    this.heightfield = await this.loadHeightfield(terrainPaths);
+    const heightfield = await this.loadHeightfield(terrainPaths);
+    if (generation !== this.loadGeneration) {
+      return;
+    }
+    this.heightfield = heightfield;
+
+    const casters: Record<ShadowGroup, CasterMesh[]> = { context: [], design: [] };
 
     for (const group of ["context", "design"] as ShadowGroup[]) {
       const meshes = await Promise.all(
         groupPaths[group].map((path) => Forma.geometry.getTriangles({ path })),
       );
-      const casters: CasterMesh[] = [];
+      if (generation !== this.loadGeneration) {
+        return;
+      }
       for (let index = 0; index < meshes.length; index++) {
         const footprint = this.casterFootprint(meshes[index], group, groupPaths[group][index]);
         if (footprint != null) {
-          casters.push({
-            positions: meshes[index],
-            groundZ:
-              this.heightfield != null
-                ? this.sampleTerrain(this.heightfield, footprint.x, footprint.y)
-                : await this.groundElevationFor(footprint),
-          });
+          const groundZ =
+            heightfield != null
+              ? this.sampleTerrain(heightfield, footprint.x, footprint.y)
+              : await this.groundElevationFor(footprint);
+          if (generation !== this.loadGeneration) {
+            return;
+          }
+          casters[group].push({ positions: meshes[index], groundZ });
         }
       }
-      this.casters[group] = casters;
     }
+    this.casters = casters;
 
     this.hasGeometry = true;
     this.lastDrawKey = "";
